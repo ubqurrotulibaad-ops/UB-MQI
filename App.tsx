@@ -7,7 +7,8 @@ import {
   Store, Wallet, Users, PieChart, FileText,
   UserCircle, ShoppingCart, Receipt, 
   Wallet2, CloudLightning, RefreshCw, Zap, Lock, Camera, 
-  Package, Banknote, Gift, Copy, CheckCircle2, AlertCircle
+  Package, Banknote, Gift, Copy, CheckCircle2, AlertCircle,
+  Database, Trash
 } from 'lucide-react';
 
 // --- UTILS ---
@@ -84,6 +85,7 @@ const App: React.FC = () => {
     setIsSyncing(true);
     try {
       const fullData = { 
+        app_signature: "UB_MQI_OFFICIAL",
         members, 
         products, 
         transactions, 
@@ -101,33 +103,42 @@ const App: React.FC = () => {
         body: JSON.stringify(fullData)
       });
 
-      if (!response.ok) throw new Error("Server tidak merespon.");
+      if (!response.ok) throw new Error("Server Cloud menolak permintaan.");
       
       const result = await response.json();
       
       if (!syncId && result.id) {
         setSyncId(result.id);
-        alert(`REGISTRASI BERHASIL!\n\nKODE CLOUD ANDA: ${result.id}\n\nCatat kode ini untuk digunakan di perangkat lain.`);
+        alert(`BERHASIL MENDAFTAR!\n\nKODE CLOUD ANDA: ${result.id}\n\nGunakan kode ini di HP lain untuk menarik data.`);
       } else {
-        alert("Data cloud berhasil diperbarui!");
+        alert("Sinkronisasi Berhasil! Data di Cloud sudah diperbarui.");
       }
-    } catch (err) {
-      alert("Gagal sinkronisasi. Pastikan Anda terhubung ke internet.");
+    } catch (err: any) {
+      alert("GAGAL MENGIRIM DATA: " + err.message);
     } finally { setIsSyncing(false); }
   };
 
   const handleFetchFromCloud = async (targetSyncId: string) => {
-    if (!targetSyncId || targetSyncId.trim().length < 5) { 
-      alert("Masukkan Kode Cloud yang valid."); 
+    const cleanId = targetSyncId.trim();
+    if (!cleanId || cleanId.length < 5) { 
+      alert("Kode Sinkronisasi tidak valid."); 
       return false; 
     }
     
     setIsSyncing(true);
     try {
-      const res = await fetch(`https://api.npoint.io/${targetSyncId}`);
-      if (!res.ok) throw new Error("Kode salah atau data tidak ditemukan.");
+      const res = await fetch(`https://api.npoint.io/${cleanId}`);
+      if (!res.ok) {
+        if (res.status === 404) throw new Error("Kode Salah atau Data sudah kedaluwarsa.");
+        throw new Error("Gagal menghubungi server.");
+      }
       
       const data = await res.json();
+      
+      // Validasi apakah ini data aplikasi kita
+      if (data.app_signature !== "UB_MQI_OFFICIAL") {
+        throw new Error("Kode ini bukan milik database UB MQI.");
+      }
       
       // Update local state with cloud data
       setMembers(data.members || INITIAL_MEMBERS);
@@ -136,14 +147,21 @@ const App: React.FC = () => {
       setSales(data.sales || []);
       setShuPool(data.shuPool || { jasaModal: 0, jasaTransaksi: 0, pengurus: 0, cadanganModal: 0, infaqMQI: 0 });
       setMemberShu(data.memberShu || []);
-      setSyncId(targetSyncId);
+      setSyncId(cleanId);
       
-      alert("SINKRONISASI BERHASIL!\nData terbaru telah dimuat.");
+      alert("SINKRONISASI BERHASIL!\nSeluruh data terbaru telah dimuat ke perangkat ini.");
       return true;
     } catch (err: any) {
-      alert(err.message || "Gagal menarik data.");
+      alert("ERROR: " + err.message);
       return false;
     } finally { setIsSyncing(false); }
+  };
+
+  const resetSyncId = () => {
+    if (window.confirm("Hapus kode sinkronisasi? Anda harus mendaftar ulang jika ingin menggunakan cloud lagi.")) {
+      setSyncId('');
+      localStorage.removeItem('ub_sync_id');
+    }
   };
 
   // --- BUSINESS LOGIC ---
@@ -233,7 +251,7 @@ const App: React.FC = () => {
       role, members, setMembers, products, setProducts, transactions, 
       setTransactions, sales, setSales, user: currentUser, 
       shuPool, memberShu, setActiveTab, syncId, handlePushToCloud, isSyncing,
-      onWithdrawSHU: handleWithdrawSHU
+      onWithdrawSHU: handleWithdrawSHU, resetSyncId
     };
     switch (activeTab) {
       case 'dashboard': return <DashboardView {...common} />;
@@ -267,14 +285,12 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 md:pl-64">
-      {/* Mobile Header */}
       <header className="fixed top-0 left-0 right-0 h-16 bg-emerald-700 text-white flex items-center justify-between px-4 z-40 md:hidden shadow-md">
         <button onClick={() => setIsSidebarOpen(true)} className="p-2 active:scale-95"><Menu size={24} /></button>
         <h1 className="font-bold text-lg tracking-tight">UB. Qurrotul 'Ibaad</h1>
         <div className="w-10"></div>
       </header>
 
-      {/* Desktop Sidebar */}
       <aside className={`fixed top-0 left-0 h-full w-64 bg-white border-r border-slate-200 z-50 transition-transform duration-300 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 overflow-y-auto hide-scrollbar`}>
         <div className="h-16 flex items-center justify-between px-6 border-b border-slate-100 bg-emerald-700 text-white">
           <span className="font-black text-xl tracking-tight">UB. MQI</span>
@@ -303,12 +319,10 @@ const App: React.FC = () => {
         </div>
       </aside>
 
-      {/* Main Content */}
       <main className="pt-20 px-4 pb-24 md:pt-10 md:px-12 max-w-6xl mx-auto animate-in fade-in duration-500">
         {renderContent()}
       </main>
 
-      {/* Mobile Bottom Nav */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t flex justify-around items-center h-16 md:hidden z-40 safe-bottom shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
         {menu.slice(0, 4).map((item) => (
           <button key={item.id} onClick={() => setActiveTab(item.id)} className={`flex flex-col items-center gap-1 w-full transition-all ${activeTab === item.id ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-500'}`}>
@@ -370,7 +384,7 @@ const LoginScreen: React.FC<any> = ({ members, onLogin, onSync, isSyncing }) => 
           <button type="submit" className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black shadow-lg hover:bg-emerald-700 active:scale-95 transition-all uppercase tracking-widest">MASUK</button>
         </form>
         <div className="pt-6 border-t text-center">
-          <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-3 flex items-center justify-center gap-2"><CloudLightning size={12} /> Ambil Data Dari Cloud</p>
+          <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-3 flex items-center justify-center gap-2"><CloudLightning size={12} /> Tarik Data Dari Cloud</p>
           <div className="flex gap-2">
             <input 
                 placeholder="KODE SYNC" 
@@ -387,14 +401,14 @@ const LoginScreen: React.FC<any> = ({ members, onLogin, onSync, isSyncing }) => 
               <RefreshCw className={isSyncing ? "animate-spin" : ""} size={18} />
             </button>
           </div>
-          <p className="text-[8px] text-slate-400 italic mt-2">*Masukkan kode sinkronisasi yang diberikan admin untuk memuat data database.</p>
+          <p className="text-[8px] text-slate-400 italic mt-2">*Masukkan kode sinkronisasi untuk memuat database terbaru.</p>
         </div>
       </div>
     </div>
   );
 };
 
-const DashboardView: React.FC<any> = ({ transactions, members, sales, role, user, syncId, handlePushToCloud, isSyncing, setActiveTab }) => {
+const DashboardView: React.FC<any> = ({ transactions, members, sales, role, user, syncId, handlePushToCloud, isSyncing, setActiveTab, resetSyncId }) => {
   const isAdmin = role === UserRole.ADMIN;
   const cash = useMemo(() => transactions.filter(t => t.category !== 'HPP').reduce((acc: number, t: any) => t.type === 'DEBIT' ? acc + t.amount : acc - t.amount, 0), [transactions]);
   const receivables = useMemo(() => sales.filter(s => s.paymentStatus === 'Piutang').reduce((acc: number, s: any) => acc + s.total, 0), [sales]);
@@ -413,7 +427,6 @@ const DashboardView: React.FC<any> = ({ transactions, members, sales, role, user
           <h2 className="text-5xl font-black mt-2 tracking-tighter">Rp {formatIDR(cash)}</h2>
         </div>
 
-        {/* Cloud Sync Control Panel */}
         <div className="bg-white p-6 rounded-[2.5rem] border border-emerald-100 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -421,16 +434,17 @@ const DashboardView: React.FC<any> = ({ transactions, members, sales, role, user
                 <CloudLightning size={24} />
               </div>
               <div>
-                <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Koneksi Database Cloud</h3>
+                <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">Status Cloud</h3>
                 <div className="flex items-center gap-2 mt-0.5">
                   {syncId ? (
-                    <span className="text-xs font-bold text-emerald-600 flex items-center gap-1"><CheckCircle2 size={12} /> Terhubung (ID: {syncId})</span>
+                    <span className="text-xs font-bold text-emerald-600 flex items-center gap-1"><CheckCircle2 size={12} /> ID: {syncId}</span>
                   ) : (
-                    <span className="text-xs font-bold text-slate-400 flex items-center gap-1"><AlertCircle size={12} /> Belum Terdaftar</span>
+                    <span className="text-xs font-bold text-slate-400 flex items-center gap-1"><AlertCircle size={12} /> Belum Sinkron</span>
                   )}
                 </div>
               </div>
             </div>
+            {syncId && <button onClick={resetSyncId} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg" title="Hapus Kode"><Trash size={18} /></button>}
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -440,7 +454,7 @@ const DashboardView: React.FC<any> = ({ transactions, members, sales, role, user
               className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"
             >
               <RefreshCw className={isSyncing ? "animate-spin" : ""} size={16} /> 
-              {syncId ? 'PERBARUI DATA CLOUD' : 'DAFTARKAN CLOUD BARU'}
+              {syncId ? 'UPDATE DATA KE CLOUD' : 'DAFTARKAN DATABASE BARU'}
             </button>
             
             {syncId && (
@@ -448,20 +462,19 @@ const DashboardView: React.FC<any> = ({ transactions, members, sales, role, user
                 onClick={() => copyToClipboard(syncId)}
                 className="bg-slate-800 text-white px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all"
               >
-                <Copy size={16} /> SALIN KODE SYNC
+                <Copy size={16} /> SALIN KODE CLOUD
               </button>
             )}
           </div>
-          {syncId && <p className="text-[9px] text-slate-400 text-center font-medium italic">*Berikan kode di atas kepada anggota agar mereka bisa melihat data simpanan terbaru.</p>}
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 flex flex-col items-center text-center shadow-sm hover:shadow-md transition-shadow">
+          <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 flex flex-col items-center text-center shadow-sm">
             <div className="p-4 bg-blue-50 text-blue-600 rounded-[1.8rem] mb-3 shadow-inner"><Users size={24} /></div>
-            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Total Anggota</p>
+            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Anggota</p>
             <p className="text-2xl font-black text-slate-800 mt-1">{members.length}</p>
           </div>
-          <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 flex flex-col items-center text-center shadow-sm hover:shadow-md transition-shadow">
+          <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 flex flex-col items-center text-center shadow-sm">
             <div className="p-4 bg-rose-50 text-rose-600 rounded-[1.8rem] mb-3 shadow-inner"><Receipt size={24} /></div>
             <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Piutang Toko</p>
             <p className="text-2xl font-black text-rose-600 mt-1">Rp {formatIDR(receivables)}</p>
@@ -482,10 +495,10 @@ const DashboardView: React.FC<any> = ({ transactions, members, sales, role, user
       </div>
       <div className="bg-emerald-700 p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden group">
         <div className="absolute -top-4 -right-4 p-4 opacity-10 rotate-12 group-hover:scale-110 transition-transform duration-700"><Zap size={100} /></div>
-        <h3 className="text-xl font-black leading-tight">Layanan Mandiri</h3>
-        <p className="text-sm text-emerald-50 font-medium leading-relaxed mt-2 opacity-90">Pantau simpanan, hutang belanja, dan perolehan SHU Anda dengan transparan dan aman.</p>
+        <h3 className="text-xl font-black leading-tight">Pantau Keuangan</h3>
+        <p className="text-sm text-emerald-50 font-medium mt-2 opacity-90">Lihat saldo simpanan, hutang, dan SHU secara langsung di HP Anda.</p>
         <div className="flex gap-2 mt-6">
-          <button onClick={() => setActiveTab('store')} className="bg-white text-emerald-700 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 active:scale-95 shadow-lg transition-transform">BELANJA <ShoppingCart size={14} /></button>
+          <button onClick={() => setActiveTab('store')} className="bg-white text-emerald-700 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg">BELANJA <ShoppingCart size={14} /></button>
           <button onClick={() => setActiveTab('simpanan-saya')} className="bg-emerald-800/50 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest active:scale-95 border border-emerald-500/30">SIMPANAN</button>
         </div>
       </div>
@@ -501,7 +514,7 @@ const AnggotaView: React.FC<any> = ({ members, setMembers, role }) => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex items-center justify-between"><h2 className="text-2xl font-black text-slate-800">Manajemen Anggota</h2>{isAdmin && <button onClick={() => setIsAddOpen(true)} className="bg-emerald-600 text-white px-5 py-3 rounded-2xl text-xs font-bold shadow-lg flex items-center gap-2 active:scale-95"><Plus size={18} /> TAMBAH</button>}</div>
+      <div className="flex items-center justify-between"><h2 className="text-2xl font-black text-slate-800">Anggota</h2>{isAdmin && <button onClick={() => setIsAddOpen(true)} className="bg-emerald-600 text-white px-5 py-3 rounded-2xl text-xs font-bold shadow-lg flex items-center gap-2 active:scale-95"><Plus size={18} /> TAMBAH</button>}</div>
       <div className="relative">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
         <input placeholder="Cari nama anggota..." value={search} onChange={e=>setSearch(e.target.value)} className="w-full pl-12 pr-4 py-4 bg-white border border-slate-100 rounded-2xl font-bold shadow-sm outline-none focus:border-emerald-500 transition-colors" />
@@ -512,10 +525,10 @@ const AnggotaView: React.FC<any> = ({ members, setMembers, role }) => {
             <img src={m.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${m.name}`} className="w-14 h-14 rounded-[1.4rem] border border-slate-50 object-cover shadow-sm" />
             <div className="flex-1 min-w-0">
               <p className="font-bold truncate text-slate-800 text-sm leading-tight">{m.name}</p>
-              <p className="text-[10px] text-slate-400 font-black uppercase tracking-tighter mt-0.5">{m.id} • {m.role} • {m.status || 'Aktif'}</p>
+              <p className="text-[10px] text-slate-400 font-black uppercase tracking-tighter mt-0.5">{m.id} • {m.role}</p>
             </div>
             {isAdmin && m.id !== 'ADM001' && (
-              <button className="p-2.5 text-rose-500 hover:bg-rose-50 rounded-xl transition-colors" onClick={() => { if(window.confirm('Hapus anggota ini selamanya?')) setMembers(members.filter((mb:any)=>mb.id !== m.id)); }}><Trash2 size={18} /></button>
+              <button className="p-2.5 text-rose-500 hover:bg-rose-50 rounded-xl transition-colors" onClick={() => { if(window.confirm('Hapus anggota ini?')) setMembers(members.filter((mb:any)=>mb.id !== m.id)); }}><Trash2 size={18} /></button>
             )}
           </div>
         ))}
@@ -545,7 +558,7 @@ const AnggotaView: React.FC<any> = ({ members, setMembers, role }) => {
           <input name="phone" placeholder="WhatsApp (08...)" className="w-full p-4 bg-slate-50 border rounded-xl font-bold" required />
           <select name="role" className="w-full p-4 bg-slate-50 border rounded-xl font-bold focus:border-emerald-500 outline-none"><option value={UserRole.ANGGOTA}>ANGGOTA</option><option value={UserRole.ADMIN}>ADMIN</option></select>
           <textarea name="address" placeholder="Alamat Lengkap" className="w-full p-4 bg-slate-50 border rounded-xl font-bold" rows={2} required />
-          <button type="submit" className="w-full bg-emerald-600 text-white py-4 rounded-xl font-black shadow-lg uppercase tracking-widest">SIMPAN ANGGOTA</button>
+          <button type="submit" className="w-full bg-emerald-600 text-white py-4 rounded-xl font-black shadow-lg uppercase tracking-widest">SIMPAN</button>
         </form>
       </Modal>
     </div>
@@ -563,12 +576,11 @@ const SimpananView: React.FC<any> = ({ transactions, setTransactions, user, role
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex items-center justify-between"><h2 className="text-2xl font-black text-slate-800">Simpanan</h2>{isAdmin && <button onClick={() => setIsAddOpen(true)} className="bg-emerald-600 text-white px-5 py-3 rounded-2xl text-xs font-bold shadow-lg flex items-center gap-2 active:scale-95"><Plus size={18} /> INPUT DANA</button>}</div>
       <div className="bg-emerald-600 p-10 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden group">
-        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform duration-700"><Wallet size={120} /></div>
         <p className="text-emerald-100 text-[10px] font-black uppercase tracking-widest opacity-80">Total Saldo {isAdmin ? 'UB' : 'Tabungan Saya'}</p>
         <h3 className="text-4xl font-black mt-1 tracking-tight">Rp {formatIDR(total)}</h3>
       </div>
       <div className="bg-white rounded-[2.5rem] border border-slate-100 divide-y overflow-hidden shadow-sm">
-        <div className="px-6 py-4 bg-slate-50 border-b text-[10px] font-black text-slate-400 uppercase tracking-widest">Riwayat Transaksi</div>
+        <div className="px-6 py-4 bg-slate-50 border-b text-[10px] font-black text-slate-400 uppercase tracking-widest">Riwayat</div>
         {displayData.slice().reverse().map((t: any) => (
           <div key={t.id} className="p-6 flex justify-between items-center text-xs hover:bg-slate-50 transition-colors">
             <div>
@@ -580,9 +592,8 @@ const SimpananView: React.FC<any> = ({ transactions, setTransactions, user, role
             </p>
           </div>
         ))}
-        {displayData.length === 0 && <p className="text-center py-20 text-slate-300 italic text-sm">Belum ada aktivitas simpanan.</p>}
       </div>
-      <Modal title="Input Dana Simpanan" isOpen={isAddOpen} onClose={() => setIsAddOpen(false)}>
+      <Modal title="Input Simpanan" isOpen={isAddOpen} onClose={() => setIsAddOpen(false)}>
         <form onSubmit={(e) => { 
           e.preventDefault(); const fd = new FormData(e.currentTarget); 
           const mId = fd.get('mId'); const mName = members.find((m:any)=>m.id === mId)?.name; 
@@ -592,14 +603,14 @@ const SimpananView: React.FC<any> = ({ transactions, setTransactions, user, role
           }]); 
           setIsAddOpen(false); 
         }} className="space-y-4">
-          <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Tanggal</label><input type="date" name="date" className="w-full p-4 bg-slate-50 border rounded-xl font-bold" defaultValue={new Date().toISOString().split('T')[0]} /></div>
-          <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Nama Anggota</label><select name="mId" className="w-full p-4 bg-slate-50 border rounded-xl font-bold focus:border-emerald-500 outline-none">{members.map((m:any)=>(<option key={m.id} value={m.id}>{m.name}</option>))}</select></div>
+          <input type="date" name="date" className="w-full p-4 bg-slate-50 border rounded-xl font-bold" defaultValue={new Date().toISOString().split('T')[0]} />
+          <select name="mId" className="w-full p-4 bg-slate-50 border rounded-xl font-bold">{members.map((m:any)=>(<option key={m.id} value={m.id}>{m.name}</option>))}</select>
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Jenis</label><select name="type" className="w-full p-4 bg-slate-50 border rounded-xl font-bold focus:border-emerald-500 outline-none"><option value="DEBIT">Masuk</option><option value="KREDIT">Keluar</option></select></div>
-            <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Kategori</label><select name="subType" className="w-full p-4 bg-slate-50 border rounded-xl font-bold focus:border-emerald-500 outline-none"><option value="Wajib">Wajib</option><option value="Pokok">Pokok</option><option value="Sukarela">Sukarela</option></select></div>
+            <select name="type" className="w-full p-4 bg-slate-50 border rounded-xl font-bold"><option value="DEBIT">Masuk</option><option value="KREDIT">Keluar</option></select>
+            <select name="subType" className="w-full p-4 bg-slate-50 border rounded-xl font-bold"><option value="Wajib">Wajib</option><option value="Pokok">Pokok</option><option value="Sukarela">Sukarela</option></select>
           </div>
-          <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Nominal (Rp)</label><input name="amount" type="number" placeholder="0" className="w-full p-4 bg-slate-50 border rounded-xl font-black text-lg focus:border-emerald-500 outline-none" required /></div>
-          <button type="submit" className="w-full bg-emerald-600 text-white py-4 rounded-xl font-black shadow-lg uppercase tracking-widest">SIMPAN SIMPANAN</button>
+          <input name="amount" type="number" placeholder="Nominal" className="w-full p-4 bg-slate-50 border rounded-xl font-black text-lg focus:border-emerald-500 outline-none" required />
+          <button type="submit" className="w-full bg-emerald-600 text-white py-4 rounded-xl font-black shadow-lg uppercase tracking-widest">SIMPAN</button>
         </form>
       </Modal>
     </div>
@@ -629,7 +640,7 @@ const StoreView: React.FC<any> = ({ products, setProducts, members, onCheckout, 
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex items-center justify-between"><h2 className="text-2xl font-black text-slate-800">UB. Store</h2>{isAdmin && (<div className="flex gap-2"><button onClick={() => setIsAddOpen(true)} className="p-3 bg-white text-emerald-600 rounded-2xl border border-slate-100 shadow-sm active:scale-90 transition-all"><Package size={20} /></button><button onClick={() => setIsPOSOpen(true)} className="relative bg-emerald-600 text-white px-5 py-3 rounded-2xl text-xs font-bold shadow-lg flex items-center gap-2 active:scale-95 transition-all"><ShoppingCart size={18} /> KASIR {cart.length > 0 && <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center border-2 border-white animate-bounce">{cart.length}</span>}</button></div>)}</div>
+      <div className="flex items-center justify-between"><h2 className="text-2xl font-black text-slate-800">UB. Store</h2>{isAdmin && (<div className="flex gap-2"><button onClick={() => setIsAddOpen(true)} className="p-3 bg-white text-emerald-600 rounded-2xl border border-slate-100 shadow-sm active:scale-90"><Package size={20} /></button><button onClick={() => setIsPOSOpen(true)} className="relative bg-emerald-600 text-white px-5 py-3 rounded-2xl text-xs font-bold shadow-lg flex items-center gap-2 active:scale-95"><ShoppingCart size={18} /> KASIR {cart.length > 0 && <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center border-2 border-white animate-bounce">{cart.length}</span>}</button></div>)}</div>
       <div className="grid grid-cols-2 gap-4">
         {products.map((p: StoreProduct) => (
           <div key={p.id} className="bg-white p-3 rounded-[2.2rem] border border-slate-100 shadow-sm relative overflow-hidden group">
@@ -644,9 +655,8 @@ const StoreView: React.FC<any> = ({ products, setProducts, members, onCheckout, 
             </div>
           </div>
         ))}
-        {products.length === 0 && <div className="col-span-2 py-20 text-center text-slate-300 italic text-sm">Belum ada barang di rak toko.</div>}
       </div>
-      <Modal title="Input Produk Baru" isOpen={isAddOpen} onClose={() => setIsAddOpen(false)}>
+      <Modal title="Produk Baru" isOpen={isAddOpen} onClose={() => setIsAddOpen(false)}>
         <form onSubmit={(e) => { 
           e.preventDefault(); const fd = new FormData(e.currentTarget); 
           const np: StoreProduct = { 
@@ -662,22 +672,21 @@ const StoreView: React.FC<any> = ({ products, setProducts, members, onCheckout, 
             <input name="sellPrice" type="number" placeholder="Harga Jual" className="w-full p-4 bg-slate-50 border rounded-xl font-bold" required />
           </div>
           <input name="stock" type="number" placeholder="Stok Awal" className="w-full p-4 bg-slate-50 border rounded-xl font-bold" required />
-          <button type="submit" className="w-full bg-emerald-600 text-white py-4 rounded-xl font-black shadow-lg uppercase tracking-widest">SIMPAN PRODUK</button>
+          <button type="submit" className="w-full bg-emerald-600 text-white py-4 rounded-xl font-black shadow-lg">SIMPAN</button>
         </form>
       </Modal>
-      <Modal title="Sistem Kasir" isOpen={isPOSOpen} onClose={() => setIsPOSOpen(false)}>
+      <Modal title="Kasir" isOpen={isPOSOpen} onClose={() => setIsPOSOpen(false)}>
         <div className="space-y-4">
           <div className="divide-y max-h-[35vh] overflow-y-auto pr-2 hide-scrollbar">
             {cart.map((item, idx) => (
               <div key={idx} className="py-4 flex justify-between items-center text-xs">
-                <div><p className="font-bold text-slate-800 text-sm leading-tight">{item.product.name}</p><p className="text-[10px] text-slate-400 font-bold mt-1">{item.qty} x Rp {formatIDR(item.product.sellPrice)}</p></div>
+                <div><p className="font-bold text-slate-800 text-sm">{item.product.name}</p><p className="text-[10px] text-slate-400 font-bold mt-1">{item.qty} x Rp {formatIDR(item.product.sellPrice)}</p></div>
                 <div className="flex items-center gap-3">
                     <p className="font-black text-emerald-600 text-sm">Rp {formatIDR(item.product.sellPrice * item.qty)}</p>
                     <button onClick={() => removeFromCart(item.product.id)} className="text-rose-400 p-2 hover:bg-rose-50 rounded-lg transition-colors"><Trash2 size={16} /></button>
                 </div>
               </div>
             ))}
-            {cart.length === 0 && <p className="text-center py-10 text-slate-300 italic">Keranjang belanja kosong.</p>}
           </div>
           <div className="bg-emerald-50 p-6 rounded-2xl flex justify-between items-center border border-emerald-100 shadow-inner">
             <span className="text-[10px] font-black text-emerald-800 uppercase tracking-widest">Total Belanja</span>
@@ -694,9 +703,9 @@ const StoreView: React.FC<any> = ({ products, setProducts, members, onCheckout, 
             }); 
             setCart([]); setIsPOSOpen(false); 
           }} className="space-y-4">
-            <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Pilih Anggota</label><select name="memberId" className="w-full p-4 bg-white border border-slate-100 rounded-xl font-bold focus:border-emerald-500 outline-none" required><option value="">-- Pilih Anggota --</option>{members.map((m: any) => (<option key={m.id} value={m.id}>{m.name}</option>))}</select></div>
-            <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Pembayaran</label><select name="paymentStatus" className="w-full p-4 bg-white border border-slate-100 rounded-xl font-bold focus:border-emerald-500 outline-none" required><option value="Lunas">Tunai (Lunas)</option><option value="Piutang">Hutang (Piutang)</option></select></div>
-            <button type="submit" disabled={cart.length === 0} className="w-full bg-emerald-600 text-white py-5 rounded-2xl font-black shadow-xl uppercase tracking-widest active:scale-95 disabled:opacity-50 transition-all">PROSES TRANSAKSI</button>
+            <select name="memberId" className="w-full p-4 bg-white border border-slate-100 rounded-xl font-bold focus:border-emerald-500 outline-none" required><option value="">-- Pilih Anggota --</option>{members.map((m: any) => (<option key={m.id} value={m.id}>{m.name}</option>))}</select>
+            <select name="paymentStatus" className="w-full p-4 bg-white border border-slate-100 rounded-xl font-bold focus:border-emerald-500 outline-none" required><option value="Lunas">Tunai (Lunas)</option><option value="Piutang">Hutang (Piutang)</option></select>
+            <button type="submit" disabled={cart.length === 0} className="w-full bg-emerald-600 text-white py-5 rounded-2xl font-black shadow-xl uppercase tracking-widest">BAYAR</button>
           </form>
         </div>
       </Modal>
@@ -711,20 +720,18 @@ const KasView: React.FC<any> = ({ transactions, setTransactions }) => {
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex items-center justify-between"><h2 className="text-2xl font-black text-slate-800">Kas Umum</h2><button onClick={() => setIsAddOpen(true)} className="bg-emerald-600 text-white px-5 py-3 rounded-2xl text-xs font-bold shadow-lg active:scale-95 transition-all"><Plus size={18} /> INPUT KAS</button></div>
-      <div className="bg-slate-800 p-8 rounded-[2.5rem] text-white shadow-xl text-center relative overflow-hidden group">
-          <div className="absolute top-0 left-0 p-4 opacity-10 group-hover:scale-110 transition-transform duration-1000"><Banknote size={120} /></div>
+      <div className="bg-slate-800 p-8 rounded-[2.5rem] text-white shadow-xl text-center relative overflow-hidden">
           <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Saldo Kas Utama</p>
           <h3 className="text-4xl font-black mt-2 tracking-tighter">Rp {formatIDR(balance)}</h3>
       </div>
       <div className="bg-white rounded-[2.5rem] border border-slate-100 divide-y overflow-hidden shadow-sm">
-        <div className="px-6 py-4 bg-slate-50 border-b text-[10px] font-black text-slate-400 uppercase tracking-widest">Aliran Dana Kas</div>
+        <div className="px-6 py-4 bg-slate-50 border-b text-[10px] font-black text-slate-400 uppercase tracking-widest">Aliran Dana</div>
         {data.slice().reverse().map((t: any) => (
           <div key={t.id} className="p-6 flex justify-between items-center text-xs hover:bg-slate-50 transition-colors">
             <div><p className="font-bold text-slate-800 text-sm">{t.description}</p><p className="text-[9px] text-slate-400 font-bold uppercase mt-1 tracking-wider">{t.category} • {t.date}</p></div>
             <p className={`font-black ${t.type === 'DEBIT' ? 'text-emerald-600' : 'text-rose-600'} text-base`}>{t.type === 'DEBIT' ? '+' : '-'} Rp {formatIDR(t.amount)}</p>
           </div>
         ))}
-        {data.length === 0 && <p className="text-center py-20 text-slate-300 italic text-sm">Belum ada transaksi kas.</p>}
       </div>
       <Modal title="Input Transaksi Kas" isOpen={isAddOpen} onClose={() => setIsAddOpen(false)}>
         <form onSubmit={(e) => { 
@@ -735,10 +742,10 @@ const KasView: React.FC<any> = ({ transactions, setTransactions }) => {
           }]); 
           setIsAddOpen(false); 
         }} className="space-y-4">
-          <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Jenis Kas</label><select name="type" className="w-full p-4 bg-slate-50 border rounded-xl font-bold focus:border-emerald-500 outline-none"><option value="DEBIT">Kas Masuk</option><option value="KREDIT">Kas Keluar</option></select></div>
-          <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Keterangan</label><input name="description" placeholder="Misal: Biaya Listrik" className="w-full p-4 bg-slate-50 border rounded-xl font-bold" required /></div>
-          <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Nominal (Rp)</label><input name="amount" type="number" placeholder="0" className="w-full p-4 bg-slate-50 border rounded-xl font-black text-lg focus:border-emerald-500 outline-none" required /></div>
-          <button type="submit" className="w-full bg-emerald-600 text-white py-4 rounded-xl font-black shadow-lg uppercase tracking-widest">SIMPAN KAS</button>
+          <select name="type" className="w-full p-4 bg-slate-50 border rounded-xl font-bold focus:border-emerald-500 outline-none"><option value="DEBIT">Kas Masuk</option><option value="KREDIT">Kas Keluar</option></select>
+          <input name="description" placeholder="Keterangan" className="w-full p-4 bg-slate-50 border rounded-xl font-bold" required />
+          <input name="amount" type="number" placeholder="Nominal" className="w-full p-4 bg-slate-50 border rounded-xl font-black text-lg focus:border-emerald-500 outline-none" required />
+          <button type="submit" className="w-full bg-emerald-600 text-white py-4 rounded-xl font-black shadow-lg uppercase tracking-widest">SIMPAN</button>
         </form>
       </Modal>
     </div>
@@ -781,8 +788,8 @@ const KeuanganView: React.FC<any> = ({ transactions, products, sales, shuPool })
           <>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 pb-2">Pendapatan Usaha</p>
             <Row l="Penjualan Produk" v={stats.totalPenjualan} />
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 pb-2 mt-8">HPP & Biaya</p>
-            <Row l="Harga Pokok Penjualan (HPP)" v={stats.totalHPP} n /><Row l="Beban Operasional (20%)" v={stats.totalBebanOps} n /><div className="bg-emerald-50 p-6 rounded-3xl border border-emerald-100 mt-8 shadow-inner"><Row l="LABA BERSIH" v={stats.labaBersih} b /></div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 pb-2 mt-8">Beban & HPP</p>
+            <Row l="Harga Pokok Penjualan (HPP)" v={stats.totalHPP} n /><Row l="Biaya Operasional (20%)" v={stats.totalBebanOps} n /><div className="bg-emerald-50 p-6 rounded-3xl border border-emerald-100 mt-8 shadow-inner"><Row l="LABA BERSIH" v={stats.labaBersih} b /></div>
           </>
         )}
       </div>
@@ -799,15 +806,14 @@ const SHUView: React.FC<any> = ({ shuPool, memberShu, user, role, onWithdrawSHU,
   
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex items-center justify-between"><h2 className="text-2xl font-black text-slate-800">Sisa Hasil Usaha (SHU)</h2>{isAdmin && <button onClick={() => setIsWthOpen(true)} className="bg-rose-600 text-white px-5 py-3 rounded-2xl text-xs font-bold shadow-lg flex items-center gap-2 active:scale-95 transition-all"><Banknote size={14} /> CAIRKAN SHU</button>}</div>
+      <div className="flex items-center justify-between"><h2 className="text-2xl font-black text-slate-800">SHU</h2>{isAdmin && <button onClick={() => setIsWthOpen(true)} className="bg-rose-600 text-white px-5 py-3 rounded-2xl text-xs font-bold shadow-lg flex items-center gap-2 active:scale-95 transition-all"><Banknote size={14} /> CAIRKAN</button>}</div>
       <div className="bg-indigo-700 p-10 rounded-[2.5rem] text-white shadow-xl text-center relative overflow-hidden group">
-          <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform duration-700"><PieChart size={120} /></div>
           <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest opacity-80">Saldo SHU {isAdmin ? 'UB' : 'Anda'}</p>
           <h3 className="text-4xl font-black mt-1 tracking-tight">Rp {formatIDR(isAdmin ? total : myTotal)}</h3>
       </div>
       {isAdmin && (
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 divide-y divide-slate-50 overflow-hidden shadow-sm space-y-3">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 pb-3">Distribusi Alokasi SHU</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 pb-3">Alokasi SHU</p>
           {Object.entries(shuPool).map(([k, v]) => (
             <div key={k} className="py-3.5 flex justify-between text-xs items-center">
                 <span className="font-bold text-slate-500 uppercase tracking-wider">{k.replace(/([A-Z])/g, ' $1')}</span>
@@ -818,9 +824,9 @@ const SHUView: React.FC<any> = ({ shuPool, memberShu, user, role, onWithdrawSHU,
       )}
       <Modal title="Pencairan SHU Anggota" isOpen={isWthOpen} onClose={() => setIsWthOpen(false)}>
         <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); onWithdrawSHU(fd.get('mId') as string, parseInt(fd.get('amount') as string)); setIsWthOpen(false); }} className="space-y-4">
-          <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Nama Anggota</label><select name="mId" className="w-full p-4 border border-slate-100 rounded-xl font-bold focus:border-emerald-500 outline-none" required><option value="">-- Pilih Anggota --</option>{memberShu.map(ms => { const m = members.find(mb => mb.id === ms.memberId); if(ms.jasaModal + ms.jasaTransaksi <= 0) return null; return <option key={ms.memberId} value={ms.memberId}>{m?.name} (Saldo: Rp {formatIDR(ms.jasaModal + ms.jasaTransaksi)})</option>})}</select></div>
-          <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Nominal Cair (Rp)</label><input name="amount" type="number" placeholder="0" className="w-full p-4 border border-slate-100 rounded-xl font-black text-lg text-rose-600 focus:border-rose-500 outline-none" required /></div>
-          <button type="submit" className="w-full bg-rose-600 text-white py-4 rounded-xl font-black uppercase shadow-lg active:scale-95 transition-all tracking-widest">PROSES PENCAIRAN</button>
+          <select name="mId" className="w-full p-4 border border-slate-100 rounded-xl font-bold focus:border-emerald-500 outline-none" required><option value="">-- Pilih Anggota --</option>{memberShu.map(ms => { const m = members.find(mb => mb.id === ms.memberId); if(ms.jasaModal + ms.jasaTransaksi <= 0) return null; return <option key={ms.memberId} value={ms.memberId}>{m?.name} (Saldo: Rp {formatIDR(ms.jasaModal + ms.jasaTransaksi)})</option>})}</select>
+          <input name="amount" type="number" placeholder="Nominal" className="w-full p-4 border border-slate-100 rounded-xl font-black text-lg text-rose-600 focus:border-rose-500 outline-none" required />
+          <button type="submit" className="w-full bg-rose-600 text-white py-4 rounded-xl font-black uppercase shadow-lg active:scale-95 transition-all tracking-widest">PENCAIRAN</button>
         </form>
       </Modal>
     </div>
@@ -832,13 +838,13 @@ const HutangView: React.FC<any> = ({ sales, user, role, onPay }) => {
   const list = isAdmin ? sales.filter((s:any)=>s.paymentStatus === 'Piutang') : sales.filter((s:any)=>s.memberId === user.id && s.paymentStatus === 'Piutang');
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <h2 className="text-2xl font-black text-slate-800">{isAdmin ? 'Semua Piutang Toko' : 'Hutang Belanja'}</h2>
+      <h2 className="text-2xl font-black text-slate-800">{isAdmin ? 'Piutang Toko' : 'Hutang Belanja'}</h2>
       <div className="space-y-4">
         {list.map((s:any)=>(
           <div key={s.id} className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex justify-between items-center text-slate-800 hover:bg-slate-50 transition-colors">
             <div className="min-w-0">
                 <p className="font-bold text-sm truncate">{s.memberName}</p>
-                <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-wider">{s.date} • {s.id}</p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-wider">{s.date}</p>
                 <p className="text-rose-600 font-black text-base mt-1.5">Rp {formatIDR(s.total)}</p>
             </div>
             {isAdmin && (
@@ -869,7 +875,7 @@ const ProfilView: React.FC<any> = ({ user, onUpdate }) => {
         <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">WhatsApp</label><input value={data.phone} onChange={e => setData(p => ({ ...p, phone: e.target.value }))} className="w-full p-4 bg-slate-50 rounded-2xl font-bold border border-slate-50 outline-none focus:border-emerald-500 transition-colors" /></div>
         <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">Alamat Lengkap</label><textarea value={data.address} onChange={e => setData(p => ({ ...p, address: e.target.value }))} className="w-full p-4 bg-slate-50 rounded-2xl font-bold border border-slate-50 outline-none focus:border-emerald-500 transition-colors" rows={2} /></div>
         <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">Ganti Password</label><input type="text" value={data.password} onChange={e => setData(p => ({ ...p, password: e.target.value }))} className="w-full p-4 bg-slate-50 rounded-2xl font-bold border border-slate-50 outline-none focus:border-emerald-500 transition-colors" /></div>
-        <button onClick={() => { onUpdate({ ...user, ...data }); alert('Profil Anda berhasil diperbarui!'); }} className="w-full bg-emerald-700 text-white py-5 rounded-[1.8rem] font-black shadow-xl uppercase active:scale-95 transition-all mt-6 tracking-[0.2em]">SIMPAN PERUBAHAN</button>
+        <button onClick={() => { onUpdate({ ...user, ...data }); alert('Profil Anda berhasil diperbarui!'); }} className="w-full bg-emerald-700 text-white py-5 rounded-[1.8rem] font-black shadow-xl uppercase active:scale-95 transition-all mt-6 tracking-[0.2em]">SIMPAN</button>
       </div>
     </div>
   );
